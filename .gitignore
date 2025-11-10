@@ -1,1 +1,7 @@
-.venv/\n__pycache__/\n*.db
+.venv/
+__pycache__/
+*.db
+
+# Files to ignore for security
+.env
+*.env
