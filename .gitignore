@@ -5,3 +5,5 @@ __pycache__/
 # Files to ignore for security
 .env
 *.env
+# RAG Database
+faiss_db/
