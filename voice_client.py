@@ -3,6 +3,8 @@ import pyttsx3
 import requests
 import datetime
 import time
+import os
+import subprocess # Import subprocess for the execution step
 
 # --- Configuration ---
 API_BASE_URL = "http://127.0.0.1:8000"
@@ -46,23 +48,27 @@ def take_command():
         print("Google Speech Recognition could not understand audio")
         return "none"
 
+# ======================= THIS IS THE FIX =======================
 def choose_endpoint(query):
     """Decides which API endpoint to use based on keywords."""
     query_lower = query.lower()
     
     # 1. TOOLS/ACTIONS (Highest priority for specific commands)
-    if "time" in query_lower or "open" in query_lower or "what's the date" in query_lower:
+    tool_keywords = ["time", "open", "what's the date", "install", "package", "software"]
+    if any(keyword in query_lower for keyword in tool_keywords):
         print("(Routing to: Tools/Gemini)")
         return ENDPOINT_TOOLS
 
     # 2. RAG (Personal Knowledge)
-    if "resume" in query_lower or "kunal" in query_lower or "skills" in query_lower or "project" in query_lower or "contact" in query_lower:
+    rag_keywords = ["resume", "kunal", "skills", "project", "contact"]
+    if any(keyword in query_lower for keyword in rag_keywords):
         print("(Routing to: RAG/Ollama)")
         return ENDPOINT_RAG
         
     # 3. DEFAULT (General Chat)
     print("(Routing to: General/Ollama)")
     return ENDPOINT_OLLAMA
+# ===============================================================
 
 # --- Main Loop ---
 def main():
@@ -96,15 +102,43 @@ def main():
                     data = response.json()
                     
                     if "response" in data:
-                        speak(data["response"])
+                        server_response = data["response"]
+                        
+                        # --- Confirmation Logic (from previous step) ---
+                        if server_response.startswith("EXECUTE_CMD:"):
+                            # The server wants us to run a command
+                            command_to_run = server_response.split(":", 1)[1]
+                            
+                            speak(f"Axon wants to run the following command: {command_to_run}. Is this okay?")
+                            
+                            # Get user confirmation
+                            confirmation = take_command()
+                            
+                            if confirmation in ["yes", "yep", "ok", "confirm", "do it"]:
+                                speak("Okay, running the command.")
+                                try:
+                                    # Run the command safely
+                                    # We use .venv\Scripts\python.exe, which is what the server generated
+                                    subprocess.run(command_to_run, shell=True, check=True)
+                                    speak("The command finished successfully.")
+                                except subprocess.CalledProcessError as e:
+                                    speak(f"The command failed with an error: {e}")
+                                except Exception as e:
+                                    speak(f"An error occurred while running the command: {e}")
+                            else:
+                                speak("Okay, I will not run the command.")
+                        # --- End Confirmation Logic ---
+                        
+                        else:
+                            # Not a command, just a normal answer
+                            speak(server_response)
+                            
                     elif "error" in data:
-                        # Reports errors from the server (e.g., "Ollama not found")
                         speak(f"Sorry, an error occurred on the server: {data['error']}")
                     else:
                         speak("Sorry, I received an unknown response.")
 
                 except requests.exceptions.RequestException as e:
-                    # Reports connection errors (e.g., server is offline)
                     speak(f"Connection failed. Please ensure the Axon server is running.")
         
         elif query != "none":
@@ -114,3 +148,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+

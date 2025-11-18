@@ -82,6 +82,35 @@ def open_url(url: str) -> str:
     except Exception as e:
         return f"Error opening {url}: {e}"
 
+def install_python_package(package_name: str) -> str:
+    """
+    Generates a safe command to install a Python package using pip.
+    The command is returned to the user for confirmation.
+    """
+    import re
+    if not re.match(r'^[a-zA-Z0-9\-_]+$', package_name):
+        return f"Error: Invalid package name '{package_name}'."
+    
+    python_exe = os.path.join(sys.prefix, 'bin', 'python') # For Linux/macOS
+    if os.name == 'nt': # For Windows
+        python_exe = os.path.join(sys.prefix, 'Scripts', 'python.exe')
+        
+    command = f"{python_exe} -m pip install {package_name}"
+    return f"EXECUTE_CMD:{command}"
+
+def install_software_winget(app_name: str) -> str:
+    """
+    Generates a safe command to install an application using Winget.
+    The command is returned to the user for confirmation.
+    """
+    import re
+    if not re.match(r'^[a-zA-Z0-9\-_ \.]+$', app_name):
+        return f"Error: Invalid application name '{app_name}'."
+    
+    command = f"winget install --id {app_name}"
+    return f"EXECUTE_CMD:{command}"
+
+
 # --- GenAI Setup ---
 try:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -92,9 +121,33 @@ try:
 
     gemini_tools = [
         {"name": "get_current_time", "description": "Get the current time and date.", "parameters": {}},
-        {"name": "open_url", "description": "Open a given URL.", "parameters": {"type": "OBJECT", "properties": {"url": {"type": "STRING"}}, "required": ["url"]}}
+        {"name": "open_url", "description": "Open a given URL.", "parameters": {"type": "OBJECT", "properties": {"url": {"type": "STRING"}}, "required": ["url"]}},
+        {
+            "name": "install_python_package",
+            "description": "Generates a command to install a Python (pip) package.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"package_name": {"type": "STRING", "description": "The name of the package to install (e.g., 'pandas', 'numpy')."}},
+                "required": ["package_name"]
+            }
+        },
+        {
+            "name": "install_software_winget",
+            "description": "Generates a command to install a software application using the Windows Winget package manager.",
+            "parameters": {
+                "type": "OBJECT",
+                "properties": {"app_name": {"type": "STRING", "description": "The name or ID of the application to install (e.g., 'VLC', 'Google.Chrome', 'Spotify.Spotify')."}},
+                "required": ["app_name"]
+            }
+        }
     ]
-    available_tools = {"get_current_time": get_current_time, "open_url": open_url}
+    
+    available_tools = {
+        "get_current_time": get_current_time,
+        "open_url": open_url,
+        "install_python_package": install_python_package,
+        "install_software_winget": install_software_winget
+    }
     
     tools_model = genai.GenerativeModel(model_name="gemini-2.5-flash", tools=gemini_tools)
     print("--- Gemini Tools Model Initialized ---")
@@ -103,6 +156,7 @@ except ValueError as e:
     print(f"Gemini Setup Error: {e}")
     tools_model = None
 
+# ======================= THIS IS THE FIX =======================
 @app.post("/chat/tools",
           response_model=ChatResponse,
           tags=["2. Tools/Actions (Gemini)"],
@@ -121,16 +175,29 @@ async def chat_with_tools(request: ChatRequest):
             tool_name = function_call.name
             tool_args = dict(function_call.args)
             
+            # Run the tool function (e.g., get_current_time or install_python_package)
             tool_response_string = available_tools[tool_name](**tool_args) if tool_args else available_tools[tool_name]()
 
+            # --- START OF FIX ---
+            # Check if the tool wants to send a command *directly* to the client
+            if tool_response_string.startswith("EXECUTE_CMD:"):
+                # If so, return that command string immediately
+                # This bypasses sending it back to Gemini for a chatty response
+                return ChatResponse(response=tool_response_string)
+            # --- END OF FIX ---
+
+            # If it's not a command, continue the normal flow:
+            # Send the function's result back to Gemini so it can formulate a nice sentence
             response = chat.send_message(
                 {"function_response": {"name": tool_name, "response": {"result": tool_response_string}}}
             )
         
+        # This is the final chatty response from Gemini (e.g., "The time is...")
         return ChatResponse(response=response.candidates[0].content.parts[0].text)
 
     except Exception as e:
         return {"error": f"Gemini Tool Error: {e}"}, 500
+# ===============================================================
 
 
 # =======================================================================

@@ -1,6 +1,7 @@
 import requests
 import time
 import os
+import subprocess # Import subprocess for the execution step
 
 # --- Configuration ---
 # These endpoints MUST match your axon_main.py server
@@ -16,13 +17,15 @@ def choose_endpoint(query):
     """
     query_lower = query.lower()
     
-    # 1. TOOLS/ACTIONS (Highest priority for specific commands)
-    if "time" in query_lower or "open" in query_lower or "what's the date" in query_lower:
+    # 1. TOOLS/ACTIONS (Highest priority)
+    tool_keywords = ["time", "open", "what's the date", "install", "package", "software"]
+    if any(keyword in query_lower for keyword in tool_keywords):
         print("(Routing to: Tools/Gemini)")
         return ENDPOINT_TOOLS
 
     # 2. RAG (Personal Knowledge)
-    if "resume" in query_lower or "kunal" in query_lower or "skills" in query_lower or "project" in query_lower or "contact" in query_lower:
+    rag_keywords = ["resume", "kunal", "skills", "project", "contact"]
+    if any(keyword in query_lower for keyword in rag_keywords):
         print("(Routing to: RAG/Ollama)")
         return ENDPOINT_RAG
         
@@ -65,7 +68,33 @@ def main():
                 
                 # 4. Print the response
                 if "response" in data:
-                    print(f"Axon: {data['response']}")
+                    server_response = data["response"]
+                    
+                    # --- NEW: Confirmation Logic ---
+                    if server_response.startswith("EXECUTE_CMD:"):
+                        command_to_run = server_response.split(":", 1)[1]
+                        
+                        print(f"Axon wants to run: {command_to_run}")
+                        confirmation = input("Is this okay? (y/n): ")
+                        
+                        if confirmation.lower().strip() == 'y':
+                            print("Okay, running the command...")
+                            try:
+                                # Run the command safely
+                                subprocess.run(command_to_run, shell=True, check=True)
+                                print("Axon: The command finished successfully.")
+                            except subprocess.CalledProcessError as e:
+                                print(f"Axon: The command failed with an error: {e}")
+                            except Exception as e:
+                                print(f"Axon: An error occurred while running the command: {e}")
+                        else:
+                            print("Axon: Okay, I will not run the command.")
+                    # --- End Confirmation Logic ---
+                    
+                    else:
+                        # Not a command, just a normal answer
+                        print(f"Axon: {server_response}")
+                        
                 elif "error" in data:
                     print(f"Axon Server Error: {data['error']}")
                 else:
