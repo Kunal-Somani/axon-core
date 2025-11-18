@@ -4,7 +4,7 @@
 
 Axon Core is a sophisticated digital intelligence platform designed for the centralized orchestration of diverse cognitive functionalities within a single, optimized service layer. The system utilizes dynamic intent routing to delegate conversational tasks to specialized Large Language Models (LLMs), thereby ensuring optimal latency, enhanced response grounding, and efficient resource allocation across all operational domains.
 
-The platform is engineered as a monolithic **Unified API Architecture** (FastAPI) that integrates three distinct Intelligent Processing Units (IPUs): General Knowledge, Real-World Action, and High-Fidelity Private Knowledge Retrieval.
+The platform is engineered as a monolithic **Unified API Architecture** (FastAPI) that integrates three distinct Intelligent Processing Units (IPUs): General Knowledge, Real-World Action, and High-Fidelity Private Knowledge Retrieval. With the latest iteration (v5.0.0), Axon extends its capabilities to secure, local system management and software provisioning via dual-modal client interfaces (Voice and Text).
 
 ---
 
@@ -12,53 +12,63 @@ The platform is engineered as a monolithic **Unified API Architecture** (FastAPI
 
 | Component | Technology | Role in the System | Engineering Rationale |
 | :--- | :--- | :--- | :--- |
-| **API/Service Layer** | **Python (FastAPI)** | Provides a unified, asynchronous, high-throughput entry point for all client requests, maintaining service stability under high load. | Decouples client interface from cognitive backend complexity. |
-| **LLM (General/RAG)** | **Ollama (Gemma:latest)** | Serves low-latency, localized conversational intelligence and private document grounding, leveraging local compute resources. | Minimizes external API dependency and cost for internal queries. |
-| **LLM (Tool-Use/Action)** | **Gemini 2.5 Flash** | Manages sophisticated intent detection, high-level reasoning, and **Function Calling** for system interaction. | Optimizes for speed and reliability in transactional, external tasks. |
-| **Orchestration/Flow** | **LangChain** | Manages complex data routing, RAG chain construction, prompt engineering, and input/output serialization across LLMs. | Provides deterministic, auditable control over multi-model workflow execution. |
-| **Vector Indexing** | **FAISS (CPU-Optimized)** | Provides highly efficient, sub-second indexing and retrieval of dense vector embeddings from proprietary, unstructured data. | Enables rapid, local access to the personal knowledge base. |
-| **Client Interface** | **Speech Recognition / PyTTSX3** | Manages client-side multi-modal I/O (Speech-to-Text, Text-to-Speech) for hands-free system engagement. | Establishes a zero-latency interactive conversational experience. |
+| **API/Service Layer** | **Python (FastAPI)** | Unified, asynchronous entry point for all client requests. | Decouples client interface from cognitive backend complexity. |
+| **LLM (General/RAG)** | **Ollama (Gemma:latest)** | Localized conversational intelligence and document grounding. | Minimizes external API dependency and operational cost. |
+| **LLM (Tool-Use/Action)** | **Gemini 2.5 Flash** | Intent detection, reasoning, and **Function Calling** for system interaction. | Optimizes for speed and reliability in transactional tasks. |
+| **Orchestration** | **LangChain** | RAG chain construction, prompt engineering, and data serialization. | Provides deterministic control over multi-model workflows. |
+| **Vector Indexing** | **FAISS (CPU-Optimized)** | High-efficiency indexing/retrieval of dense vector embeddings. | Enables rapid access to the proprietary knowledge base. |
+| **System Integration** | **Subprocess / Winget / Pip** | Controlled execution of shell commands for software provisioning. | Facilitates secure, parameterized system management. |
+| **Client Interface** | **Dual-Modal (Voice/Text)** | Speech-to-Text (STT), Text-to-Speech (TTS), and CLI interaction. | Offers flexible, zero-latency system engagement. |
 
 ---
 
 ## 3. Advanced Cognitive Functionality and Intent Routing
 
-Axon's primary innovation lies in its ability to **dynamically route** a single user query to the most capable internal IPU based on linguistic intent.
+Axon employs a deterministic routing matrix to delegate queries to the most capable internal IPU.
 
 ### A. IPU 1: High-Fidelity Private Knowledge Retrieval (`/chat/rag`)
 
-This is the most complex IPU, dedicated to answering questions exclusively from the user's proprietary document index (Vector Store).
+Dedicated to answering questions exclusively from the user's proprietary document index.
 
-* **Retrieval Mechanism:** **Step-Back Query Generation**
-    1.  **Intent Parsing:** The system receives a specific question (e.g., "What is the contact email?").
-    2.  **Query Abstraction:** A preparatory LLM (`Gemma:latest`) is used to generate a **broader, more generalized query** (e.g., "What are Kunal's contact details?").
-    3.  **Context Augmentation:** The generalized query is executed against the FAISS index, ensuring the retrieval of broad, relevant context that the specific question might have missed.
-    4.  **Grounding:** The comprehensive retrieved context and the *original, specific question* are presented to the final LLM for a precise, factual answer.
-* **Result:** This technique fundamentally mitigates common "dumb retrieval" failures in standard RAG, yielding highly accurate and reliable synthesis of internal document data.
+* **Mechanism:** **Step-Back Query Generation**.
+    1.  **Abstraction:** A preparatory LLM generates a generalized version of the user's specific query.
+    2.  **Context Augmentation:** The generalized query retrieves broad context from the FAISS index to mitigate "dumb retrieval" failures.
+    3.  **Grounding:** The retrieved context is synthesized with the original query for a factual, hallucination-free response.
 
 ### B. IPU 2: Integrated Reasoning and Tool Execution (`/chat/tools`)
 
-This unit is reserved for actions that require external execution or real-time data access, utilizing the superior reasoning of the Gemini model.
+Reserved for actions requiring external execution, real-time data access, or system modification.
 
-* **Functioning:** The model identifies an executable action (e.g., "Open YouTube," "Get Time") and translates the request into a discrete Python function call, maintaining a controlled execution sandbox.
+* **Capabilities:**
+    * **Real-Time Data:** Retrieval of temporal data (Time/Date).
+    * **Web Interaction:** Automated browser navigation.
+    * **Secure Software Provisioning:** Automated installation of Python packages (via `pip`) and Desktop Applications (via `winget`).
+* **Security Protocol (Human-in-the-Loop):**
+    To prevent unauthorized system modification, Axon implements a **Secure Execution Handshake**. The server generates the shell command (e.g., `winget install VLC`) but does *not* execute it. Instead, it returns an `EXECUTE_CMD` signal to the client, forcing a blocking user-confirmation prompt before execution occurs.
 
 ### C. IPU 3: Generalized Conversational Intelligence (`/chat/ollama`)
 
-This foundational layer handles all non-specialized, common knowledge tasks. It utilizes the locally hosted Ollama model to manage simple conversation, serving as the default IPU for efficient resource management.
+The foundational layer for non-specialized, common knowledge tasks, utilizing locally hosted models for resource efficiency.
 
 ---
 
-## 4. Operational Workflow (Execution Sequence)
+## 4. Operational Workflow and Client Architecture
 
-The client application follows a critical path sequence to determine the appropriate service:
+The system supports dual-modal input via two specialized clients: `voice_client.py` (Speech) and `text_client.py` (CLI).
 
-1.  **Client Input:** User speaks the **Wake Word** (`Axon`).
-2.  **Intent Classification (Client-Side):** The client application classifies the subsequent command using a simple keyword routing matrix:
-    * **IF** keywords like *'time,' 'open,' 'date'* are detected → **Route to `/chat/tools` (Gemini)**.
-    * **ELSE IF** keywords like *'resume,' 'Kunal,' 'project'* are detected → **Route to `/chat/rag` (Local RAG)**.
-    * **ELSE** → **Route to `/chat/ollama` (Local General Chat)**.
-3.  **API Execution:** The request is sent to the specific endpoint of the unified `axon_main.py` server.
-4.  **System Response:** The appropriate IPU processes the request and returns the final synthesized answer to the client for Text-to-Speech (TTS) output.
+### Execution Sequence
+
+1.  **Input Acquisition:** User provides input via Microphone (Wake Word: `Axon`) or Terminal Command.
+2.  **Intent Classification (Client-Side Routing):** The client classifies the command using a keyword matrix:
+    * **System/Action Keywords** (*install, package, time, open*) → **Route to `/chat/tools`**.
+    * **Knowledge Keywords** (*resume, project, skills, contact*) → **Route to `/chat/rag`**.
+    * **Default Fallback** → **Route to `/chat/ollama`**.
+3.  **API Processing:** The Unified Server processes the request via the selected IPU.
+4.  **Action Handling (If applicable):**
+    * If the IPU generates a system command (e.g., software installation), the server returns an `EXECUTE_CMD` payload.
+    * The Client detects this payload and pauses for user authorization (`y/n`).
+    * Upon authorization, the Client executes the command via a secure `subprocess` shell.
+5.  **Response Synthesis:** The final output is presented via TTS (Voice Client) or Standard Output (Text Client).
 
 ---
 
@@ -69,6 +79,7 @@ The client application follows a critical path sequence to determine the appropr
 * Python 3.10+
 * Local Ollama Server application installed and running.
 * A Gemini API Key (for tool use).
+* Windows OS (required for `winget` functionality; adaptable for Linux).
 
 ### Setup and Execution
 
@@ -79,8 +90,8 @@ The client application follows a critical path sequence to determine the appropr
     python -m venv .venv
     .\.venv\Scripts\Activate.ps1
     
-    # Install all dependencies (ensuring stability across all LLM tools)
-    python -m pip install fastapi uvicorn ollama google-generativeai python-dotenv pypdf faiss-cpu langchain langchain-community langchain-ollama langchain-core
+    # Install dependencies including RAG, Voice, and System tools
+    python -m pip install fastapi uvicorn ollama google-generativeai python-dotenv pypdf faiss-cpu langchain langchain-community langchain-ollama langchain-core speechrecognition pyttsx3 requests
     ```
 
 2.  **Secure API Key Configuration:**
@@ -97,14 +108,19 @@ The client application follows a critical path sequence to determine the appropr
     ```
 
 4.  **Final Execution:**
-    Run the unified API server and the smart client in separate terminals.
+    Run the unified API server and your preferred client interface.
     
-    **Terminal 1 (Server):**
+    **Terminal 1 (Unified Server):**
     ```bash
     .\.venv\Scripts\python.exe axon_main.py
     ```
     
-    **Terminal 2 (Client):**
-    ```bash
-    .\.venv\Scripts\python.exe voice_client.py
-    ```
+    **Terminal 2 (Client - Choose One):**
+    * **Voice Interface:**
+        ```bash
+        .\.venv\Scripts\python.exe voice_client.py
+        ```
+    * **Text/CLI Interface:**
+        ```bash
+        .\.venv\Scripts\python.exe text_client.py
+        ```
