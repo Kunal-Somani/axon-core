@@ -2,7 +2,7 @@
 
 ## 1. Architectural Mandate and System Overview
 
-Axon Core is a sophisticated digital intelligence platform designed for the centralized orchestration of diverse cognitive functionalities within a single, optimized service layer. The system utilizes dynamic intent routing to delegate conversational tasks to specialized Large Language Models (LLMs), thereby ensuring optimal latency, enhanced response grounding, and efficient resource allocation across all operational domains.
+Axon Core is a sophisticated digital intelligence platform designed for the centralized orchestration of diverse cognitive functionalities within a single, optimized service layer. The system utilizes dynamic intent routing to delegate conversational tasks to specialized Large Language Models (LLMs), ensuring optimal latency, enhanced response grounding, and efficient resource allocation across all operational domains.
 
 The platform is engineered as a monolithic **Unified API Architecture** (FastAPI) that integrates three distinct Intelligent Processing Units (IPUs): General Knowledge, Real-World Action, and High-Fidelity Private Knowledge Retrieval. With the latest iteration (v5.0.0), Axon extends its capabilities to secure, local system management and software provisioning via dual-modal client interfaces (Voice and Text).
 
@@ -42,9 +42,10 @@ Reserved for actions requiring external execution, real-time data access, or sys
 * **Capabilities:**
     * **Real-Time Data:** Retrieval of temporal data (Time/Date).
     * **Web Interaction:** Automated browser navigation.
-    * **Secure Software Provisioning:** Automated installation of Python packages (via `pip`) and Desktop Applications (via `winget`).
+    * **Secure Software Provisioning:** Automated installation of Python packages (via `pip`).
+    * **Search-First Provisioning (Winget):** To resolve ambiguity (e.g., "Discord" vs. `Discord.Discord`), the system first executes a `winget search` to identify the precise Package ID. Only this exact ID is used to generate the final, unambiguous installation command, preventing installation failures.
 * **Security Protocol (Human-in-the-Loop):**
-    To prevent unauthorized system modification, Axon implements a **Secure Execution Handshake**. The server generates the shell command (e.g., `winget install VLC`) but does *not* execute it. Instead, it returns an `EXECUTE_CMD` signal to the client, forcing a blocking user-confirmation prompt before execution occurs.
+    To prevent unauthorized system modification, Axon implements a **Secure Execution Handshake**. The server generates the shell command (e.g., `winget install --id Discord.Discord`) but does *not* execute it. Instead, it returns an `EXECUTE_CMD` signal to the client, forcing a blocking user-confirmation prompt before execution occurs.
 
 ### C. IPU 3: Generalized Conversational Intelligence (`/chat/ollama`)
 
@@ -85,7 +86,7 @@ The system supports dual-modal input via two specialized clients: `voice_client.
 
 1.  **Clone Repository & Install Dependencies:**
     ```bash
-    git clone [REPO_URL] axon-core
+    git clone [https://github.com/your-username/axon-core.git](https://github.com/your-username/axon-core.git)
     cd axon-core
     python -m venv .venv
     .\.venv\Scripts\Activate.ps1

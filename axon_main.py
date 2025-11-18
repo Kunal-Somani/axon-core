@@ -3,11 +3,13 @@ import sys
 import uvicorn
 import datetime
 import webbrowser
+import subprocess
+import re # Import re at top level
 from fastapi import FastAPI
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# --- LLM and RAG Imports (Using stable LangChain Core/Ollama paths) ---
+# --- LLM and RAG Imports ---
 import ollama
 import google.generativeai as genai
 from langchain_community.vectorstores import FAISS
@@ -19,7 +21,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 # --- Initialization ---
 load_dotenv()
-ollama_host = "http://127.0.0.1:11434" # Confirmed local Ollama host
+ollama_host = "http://127.0.0.1:11434"
 
 # --- App Setup ---
 app = FastAPI(
@@ -53,7 +55,6 @@ except Exception as e:
           tags=["1. General Chat (Ollama)"],
           summary="General chat with local Ollama (Gemma)")
 def chat_ollama(request: ChatRequest):
-    """Answers general questions using the local Gemma model."""
     if not ollama_client:
         return {"error": "Ollama client is not initialized or server is offline."}, 500
     try:
@@ -85,14 +86,12 @@ def open_url(url: str) -> str:
 def install_python_package(package_name: str) -> str:
     """
     Generates a safe command to install a Python package using pip.
-    The command is returned to the user for confirmation.
     """
-    import re
     if not re.match(r'^[a-zA-Z0-9\-_]+$', package_name):
         return f"Error: Invalid package name '{package_name}'."
     
-    python_exe = os.path.join(sys.prefix, 'bin', 'python') # For Linux/macOS
-    if os.name == 'nt': # For Windows
+    python_exe = os.path.join(sys.prefix, 'bin', 'python') 
+    if os.name == 'nt':
         python_exe = os.path.join(sys.prefix, 'Scripts', 'python.exe')
         
     command = f"{python_exe} -m pip install {package_name}"
@@ -100,15 +99,55 @@ def install_python_package(package_name: str) -> str:
 
 def install_software_winget(app_name: str) -> str:
     """
-    Generates a safe command to install an application using Winget.
-    The command is returned to the user for confirmation.
+    Searches for an application using Winget to find the exact ID, 
+    then generates a safe install command. This prevents ambiguity errors.
     """
-    import re
     if not re.match(r'^[a-zA-Z0-9\-_ \.]+$', app_name):
         return f"Error: Invalid application name '{app_name}'."
     
-    command = f"winget install --id {app_name}"
-    return f"EXECUTE_CMD:{command}"
+    print(f"--- Searching Winget for: {app_name} ---")
+    
+    try:
+        # 1. Search for the app to get the ID
+        search_cmd = f"winget search \"{app_name}\" --accept-source-agreements"
+        
+        # Run search and capture output
+        result = subprocess.run(search_cmd, capture_output=True, text=True, shell=True)
+        
+        # 2. Parse the output to find the best ID
+        package_id = None
+        lines = result.stdout.splitlines()
+        
+        for line in lines:
+            # Skip header/separator lines
+            if line.startswith("Name") or line.startswith("----") or not line.strip():
+                continue
+            
+            # Split by multiple spaces to handle fixed-width format
+            parts = re.split(r'\s{2,}', line.strip())
+            
+            if len(parts) >= 2:
+                candidate_id = parts[1]
+                
+                # Heuristic: Prefer IDs that look like "Vendor.App"
+                if "." in candidate_id:
+                    package_id = candidate_id
+                    break # Found a good candidate, stop looking
+                
+                if not package_id:
+                    package_id = candidate_id
+
+        if not package_id:
+             return f"Error: Could not find a package ID for '{app_name}'."
+
+        print(f"--- Found Package ID: {package_id} ---")
+
+        # 3. Generate the install command using the exact ID
+        command = f"winget install --id {package_id} -e --accept-source-agreements --accept-package-agreements --source winget"
+        return f"EXECUTE_CMD:{command}"
+
+    except Exception as e:
+        return f"Error searching/installing app: {e}"
 
 
 # --- GenAI Setup ---
@@ -156,48 +195,35 @@ except ValueError as e:
     print(f"Gemini Setup Error: {e}")
     tools_model = None
 
-# ======================= THIS IS THE FIX =======================
 @app.post("/chat/tools",
           response_model=ChatResponse,
           tags=["2. Tools/Actions (Gemini)"],
           summary="Chat with Gemini to use tools (e.g., get time, open URL)")
 async def chat_with_tools(request: ChatRequest):
-    """Executes external actions using the Gemini API."""
     if not tools_model:
         return {"error": "Gemini API key not configured."}, 500
     try:
         chat = tools_model.start_chat(enable_automatic_function_calling=False)
         response = chat.send_message(request.query)
         
-        # Tool execution logic
         if response.candidates[0].content.parts and response.candidates[0].content.parts[0].function_call:
             function_call = response.candidates[0].content.parts[0].function_call
             tool_name = function_call.name
             tool_args = dict(function_call.args)
             
-            # Run the tool function (e.g., get_current_time or install_python_package)
             tool_response_string = available_tools[tool_name](**tool_args) if tool_args else available_tools[tool_name]()
 
-            # --- START OF FIX ---
-            # Check if the tool wants to send a command *directly* to the client
             if tool_response_string.startswith("EXECUTE_CMD:"):
-                # If so, return that command string immediately
-                # This bypasses sending it back to Gemini for a chatty response
                 return ChatResponse(response=tool_response_string)
-            # --- END OF FIX ---
 
-            # If it's not a command, continue the normal flow:
-            # Send the function's result back to Gemini so it can formulate a nice sentence
             response = chat.send_message(
                 {"function_response": {"name": tool_name, "response": {"result": tool_response_string}}}
             )
         
-        # This is the final chatty response from Gemini (e.g., "The time is...")
         return ChatResponse(response=response.candidates[0].content.parts[0].text)
 
     except Exception as e:
         return {"error": f"Gemini Tool Error: {e}"}, 500
-# ===============================================================
 
 
 # =======================================================================
@@ -216,15 +242,12 @@ try:
     answer_llm = ChatOllama(model="gemma:latest", base_url=ollama_host)
     query_llm = ChatOllama(model="gemma:latest", base_url=ollama_host)
 
-    # Step-Back Prompt (for better retrieval)
     step_back_template = "You are an expert at query rewriting. Generate a broader, 'step-back' version of this question to retrieve more general context. User Question: {question} Step-Back Question:"
     step_back_prompt = PromptTemplate.from_template(step_back_template)
 
-    # RAG Answer Prompt
     template = "You are 'Axon'. Answer the user's *original question* based *only* on the Context. If you don't know, state it clearly. Context: {context} Original Question: {question} Answer:"
     prompt = PromptTemplate.from_template(template)
 
-    # RAG Chain Definition
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
@@ -249,7 +272,6 @@ except Exception as e:
           tags=["3. Personal RAG (Ollama)"],
           summary="Chat with your local documents (e.g., resume)")
 async def chat_with_rag(request: ChatRequest):
-    """Answers questions based on local RAG documents."""
     if not rag_chain:
         return {"error": "RAG chain is not initialized. Vector store (faiss_db) missing or Ollama offline."}, 500
     try:
@@ -268,5 +290,4 @@ def read_root():
 
 if __name__ == "__main__":
     print("--- Starting Axon Unified Server (Local) ---")
-    # Note: Using "axon_main:app" to reference this file/app in uvicorn.
     uvicorn.run("axon_main:app", host="127.0.0.1", port=8000)
