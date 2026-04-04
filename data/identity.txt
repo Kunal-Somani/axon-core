@@ -1,0 +1,11 @@
+USER IDENTITY:
+Name: Kunal
+Roll Number (Thapar): 102323012
+Student ID (IIT Madras): 23f2001869
+
+CURRENT ACADEMICS:
+1. Pursuing Bachelor of Engineering in Robotics and Artificial Intelligence at Thapar Institute of Engineering and Technology (TIET).
+2. Pursuing Bachelor of Science (BS) in Data Science and Applications at the Indian Institute of Technology (IIT), Madras.
+
+INTERESTS:
+Computer vision, AI, ML, robotics, and open-source (GSoC).

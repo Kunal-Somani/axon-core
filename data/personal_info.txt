@@ -1,0 +1,11 @@
+USER PROFILE: KUNAL
+Full Name: Kunal
+Roll Number (Thapar): 102323012
+Student ID (IIT Madras): 23f2001869
+
+CURRENT STUDIES:
+1. Bachelor of Engineering in Robotics and Artificial Intelligence at Thapar Institute of Engineering and Technology.
+2. Bachelor of Science (BS) in Data Science and Applications at the Indian Institute of Technology (IIT), Madras.
+
+BACKGROUND:
+Kunal is an engineering student with a deep interest in computer vision, AI, ML, and robotics. He has worked on projects like Parkinson's detection, autonomous rovers, and biometric security.
