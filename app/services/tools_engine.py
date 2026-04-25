@@ -1,57 +1,111 @@
-import subprocess
+import ast
+import math
+import psutil
+import platform
 import os
-from langchain_ollama import ChatOllama
-from langchain_core.prompts import PromptTemplate
-from langchain_core.output_parsers import StrOutputParser
+from datetime import datetime, timezone
+from pathlib import Path
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://172.17.0.1:11434")
-llm = ChatOllama(model="gemma:latest", base_url=OLLAMA_HOST)
+try:
+    from duckduckgo_search import DDGS
+    _ddgs_available = True
+except ImportError:
+    _ddgs_available = False
 
-# Strict prompt to force Gemma to output ONLY a bash command
-template = """You are a senior system administrator running on a Linux machine.
-Translate the user's request into a single, valid bash command.
-OUTPUT ONLY THE RAW COMMAND. Do not include markdown formatting, backticks, or explanations. 
+# Safe math evaluator
+_SAFE_MATH_NODES = {
+    ast.Expression, ast.BinOp, ast.UnaryOp, ast.Constant,
+    ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv,
+    ast.Mod, ast.Pow, ast.USub, ast.UAdd
+}
 
-User Request: {request}
-Command:"""
-
-prompt = PromptTemplate.from_template(template)
-
-def execute_system_command(user_request: str) -> str:
-    """Uses Gemma to generate a bash command, executes it, and returns the output."""
+def _safe_eval(expr: str) -> str:
     try:
-        # 1. Generate the command using our local LLM
-        chain = prompt | llm | StrOutputParser()
-        raw_command = chain.invoke({"request": user_request}).strip()
-        
-        # Clean up Markdown if the LLM gets chatty
-        if raw_command.startswith("```bash"): 
-            raw_command = raw_command[7:]
-        elif raw_command.startswith("```"): 
-            raw_command = raw_command[3:]
-            
-        if raw_command.endswith("```"): 
-            raw_command = raw_command[:-3]
-            
-        command = raw_command.strip()
-
-        print(f"--- [TOOLS] Attempting to execute: {command} ---")
-        
-        # 2. Execute the command securely via Python subprocess
-        # NOTE: This executes inside the Docker container environment
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            capture_output=True, 
-            text=True, 
-            timeout=15 # Prevent infinite hanging commands
-        )
-        
-        if result.returncode == 0:
-            output = result.stdout.strip() if result.stdout else "Command executed successfully with no output."
-            return f"Executed: `{command}`\n\nResult:\n{output}"
-        else:
-            return f"Command Failed: `{command}`\n\nError:\n{result.stderr.strip()}"
-            
+        tree = ast.parse(expr.strip(), mode='eval')
+        for node in ast.walk(tree):
+            if type(node) not in _SAFE_MATH_NODES:
+                return f"Error: expression contains disallowed operations"
+        result = eval(compile(tree, '<string>', 'eval'), {"__builtins__": {}}, {})
+        return str(result)
     except Exception as e:
-        return f"Failed to execute tool pipeline: {str(e)}"
+        return f"Calculation error: {e}"
+
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+ALLOWED_LIST_PATHS = [PROJECT_ROOT, Path.home() / "Documents"]
+
+TOOL_REGISTRY = {
+    "get_system_info": lambda **_: {
+        "os": platform.system(),
+        "os_version": platform.version(),
+        "python": platform.python_version(),
+        "cpu_count": psutil.cpu_count(logical=True),
+        "cpu_percent": psutil.cpu_percent(interval=1),
+        "ram_total_gb": round(psutil.virtual_memory().total / 1e9, 2),
+        "ram_used_gb": round(psutil.virtual_memory().used / 1e9, 2),
+        "disk_used_gb": round(psutil.disk_usage('/').used / 1e9, 2),
+        "disk_total_gb": round(psutil.disk_usage('/').total / 1e9, 2),
+    },
+    "get_current_datetime": lambda **_: {
+        "datetime": datetime.now(timezone.utc).isoformat(),
+        "timezone": "UTC"
+    },
+    "list_directory": lambda path=".", **_: _list_directory(path),
+    "search_web": lambda query="", **_: _search_web(query),
+    "get_weather": lambda city="", **_: _get_weather(city),
+    "calculate": lambda expression="", **_: {"result": _safe_eval(expression)},
+}
+
+def _list_directory(path: str) -> dict:
+    target = Path(path).resolve()
+    allowed = any(str(target).startswith(str(p.resolve())) for p in ALLOWED_LIST_PATHS)
+    if not allowed:
+        return {"error": f"Access denied: path '{path}' is outside allowed directories"}
+    try:
+        entries = [{"name": e.name, "type": "dir" if e.is_dir() else "file"} for e in sorted(target.iterdir())]
+        return {"path": str(target), "entries": entries}
+    except Exception as e:
+        return {"error": str(e)}
+
+def _search_web(query: str) -> dict:
+    if not query:
+        return {"error": "No query provided"}
+    if not _ddgs_available:
+        return {"error": "Web search not available"}
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=3))
+        return {"results": [{"title": r["title"], "body": r["body"], "url": r["href"]} for r in results]}
+    except Exception as e:
+        return {"error": str(e)}
+
+def _get_weather(city: str) -> dict:
+    if not city:
+        return {"error": "No city provided"}
+    try:
+        import urllib.request, json as _json
+        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={city}&count=1"
+        with urllib.request.urlopen(geo_url, timeout=5) as r:
+            geo = _json.loads(r.read())
+        if not geo.get("results"):
+            return {"error": f"City '{city}' not found"}
+        lat = geo["results"][0]["latitude"]
+        lon = geo["results"][0]["longitude"]
+        wx_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        with urllib.request.urlopen(wx_url, timeout=5) as r:
+            wx = _json.loads(r.read())
+        cw = wx["current_weather"]
+        return {"city": city, "temperature_c": cw["temperature"], "windspeed_kmh": cw["windspeed"], "weathercode": cw["weathercode"]}
+    except Exception as e:
+        return {"error": str(e)}
+
+def execute_tool(tool_name: str, params: dict) -> dict:
+    if tool_name not in TOOL_REGISTRY:
+        available = list(TOOL_REGISTRY.keys())
+        return {"error": f"Tool '{tool_name}' not found. Available: {available}"}
+    try:
+        return TOOL_REGISTRY[tool_name](**params)
+    except Exception as e:
+        return {"error": f"Tool execution failed: {e}"}
+
+def get_available_tools() -> list[str]:
+    return list(TOOL_REGISTRY.keys())
