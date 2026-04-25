@@ -1,116 +1,87 @@
-# Axon Core
+# Axon — Production Multimodal AI Assistant
 
-Axon Core is a "Tri-Modal" AI assistant designed to act as a highly personalized, locally-hosted intelligence engine. It combines a Next.js frontend dashboard with a high-performance FastAPI orchestrator, utilizing a hybrid architecture that seamlessly routes user intent between personal knowledge retrieval, operating system automation, and general conversational AI.
+A locally-hosted AI assistant with hybrid RAG, semantic routing, multimodal input, and zero external LLM API dependencies.
 
-##System Architecture
-
-Axon Core utilizes a "Semantic Router" pattern to determine the optimal execution path for every user query. 
+## Architecture
 
 ```mermaid
-graph TD;
-    UI[Next.js Dashboard UI] -->|HTTP POST| API(FastAPI Orchestrator)
-    API --> Router{Gemini 2.5 Flash Router}
+graph TD
+    UI[Next.js Frontend<br/>WebSocket Streaming]
+    WS[FastAPI WebSocket /ws/chat]
+    ROUTER[BART-MNLI Zero-Shot Router<br/>facebook/bart-large-mnli]
     
-    Router -->|route: 'rag'| RAG[Knowledge Base]
-    Router -->|route: 'tools'| Tools[System Automation]
-    Router -->|route: 'general'| GenAI[General Conversation]
+    UI -->|WebSocket| WS
+    WS --> ROUTER
     
-    RAG --> Qdrant[(Qdrant Vector DB)]
-    RAG --> LLM1((Local Gemma LLM))
+    ROUTER -->|personal_knowledge_query / document_analysis| HYBRID
+    ROUTER -->|system_tool_execution| TOOLS
+    ROUTER -->|general_conversation| LLM
+    ROUTER -->|image_analysis| VISION
     
-    Tools --> OS[Host OS Terminal]
+    subgraph HYBRID [Hybrid RAG Engine]
+        DENSE[Dense Retrieval<br/>all-MiniLM-L6-v2 + Qdrant]
+        SPARSE[Sparse Retrieval<br/>BM25Okapi]
+        RRF[Reciprocal Rank Fusion<br/>k=60]
+        DENSE --> RRF
+        SPARSE --> RRF
+    end
     
-    GenAI --> LLM2((Local Gemma LLM))
+    VISION[Vision Engine<br/>BLIP + Tesseract OCR]
+    TOOLS[Secure Tool Registry<br/>psutil · DuckDuckGo · Open-Meteo]
+    LLM[LLM Engine<br/>Phi-3-mini GGUF via llama-cpp-python]
+    MEMORY[(SQLite Session Memory<br/>Last 6 turns of context)]
     
-    Qdrant --> Output[Consolidated Response]
-    OS --> Output
-    LLM2 --> Output
-    Output --> UI
+    RRF --> LLM
+    VISION --> LLM
+    TOOLS --> UI
+    LLM --> UI
+    LLM <-->|read/write| MEMORY
 ```
 
-### The Three Routing Lanes:
+## Models Used
 
-1. **Knowledge Base (RAG):** Activated for personal queries (e.g., "What is my roll number?"). Pulls embedded data from a local Qdrant Vector DB and generates answers using `gemma:latest`.
-2. **System Tools:** Activated for OS-level tasks. Safely executes system commands (e.g., `uname -a`, directory listings) and returns the terminal output.
-3. **General AI:** Activated for standard chat, logic, and coding assistance, bypassing the vector database for faster inference.
+| Model | Role | Size | Why |
+|---|---|---|---|
+| all-MiniLM-L6-v2 | Text Embeddings | ~90MB | Fast, 384-dim, strong semantic similarity at small size |
+| facebook/bart-large-mnli | Semantic Router | ~1.6GB | Zero-shot NLI classification — no fine-tuning required |
+| Phi-3-mini-4k-instruct Q4_K_M | LLM (generation) | ~2.3GB | State-of-the-art at its size class, runs efficiently on CPU via llama.cpp |
+| Salesforce/blip-image-captioning-base | Vision | ~990MB | Strong image captioning + composable with Tesseract OCR |
 
-## Tech Stack
+## Design Decisions
 
-**Frontend (The Glass):**
-* Framework: Next.js (React)
-* Styling: Tailwind CSS
-* Icons: Lucide React
+**llama-cpp-python over Ollama:** Ollama is a daemon that wraps GGUF models over HTTP. Using llama-cpp-python directly loads the model into the Python process — no daemon dependency, reproducible, and embeds cleanly in Docker.
 
-**Backend (The Engine):**
-* Framework: FastAPI (Python)
-* Orchestration: LangChain
-* Routing: Google Gemini 2.5 Flash API
-* Local LLM: Ollama (Running `gemma:latest`)
-* Embeddings: `nomic-embed-text`
-* Vector Database: Qdrant
-* Containerization: Docker & Docker Compose
+**BART MNLI over prompt-based routing:** A prompt-based router (asking the LLM "which category is this?") adds a full LLM inference round-trip to every request. BART-MNLI runs a dedicated classification head on ~50ms CPU inference with calibrated confidence scores.
 
-## Project Structure
+**Reciprocal Rank Fusion over naive concatenation:** Pure dense retrieval misses exact keyword matches. Pure BM25 misses semantic similarity. RRF merges ranked lists from both without requiring score normalisation across incompatible scales.
 
-```text
-axon-core/
-├── axon-ui/                 # Next.js Frontend Dashboard
-│   ├── src/app/page.tsx     # Main chat interface
-│   └── package.json         
-├── app/                     # FastAPI Backend
-│   ├── main.py              # API Orchestrator & CORS config
-│   ├── rag/
-│   │   └── qdrant_store.py  # Vector DB ingestion & retrieval logic
-│   └── services/
-│       ├── router.py        # Gemini intent classification
-│       ├── rag_chain.py     # System-authorized RAG generation
-│       ├── tools_engine.py  # System command execution
-│       └── general_chat.py  # Standard conversational logic
-├── data/                    # Local Knowledge Base (Ignored in .gitignore)
-│   ├── identity.txt         # Core user context 
-│   └── resume.pdf           # Extended professional context
-├── docker-compose.yml       # Container orchestration (API, Qdrant, Redis)
-└── requirements.txt         # Python dependencies
-```
+**BM25 in-memory index:** The BM25 corpus is rebuilt on each ingest and held in RAM. For the scale this project operates at (hundreds to low thousands of chunks), this is faster than a database round-trip and avoids an additional service dependency.
 
-##Quick Start Guide
+## Quick Start
 
-### 1. Prerequisites
-* **Docker** installed and running.
-* **Node.js** (v18+) installed.
-* **Ollama** installed on the host machine with models pulled:
-  ```bash
-  ollama pull gemma:latest
-  ollama pull nomic-embed-text
-  ```
-
-### 2. Environment Setup
-Create a `.env` file in the root directory:
-```env
-GOOGLE_API_KEY=your_gemini_api_key_here
-OLLAMA_HOST=[http://172.17.0.1:11434](http://172.17.0.1:11434)  # Docker bridge IP to host machine
-```
-
-### 3. Boot the Backend (Docker)
-Start the FastAPI orchestrator, Qdrant database, and Redis queue:
 ```bash
+# 1. Clone and enter the project
+git clone <repo_url> && cd axon-core
+
+# 2. Download all model weights (~5GB total)
+chmod +x scripts/download_models.sh
+./scripts/download_models.sh
+
+# 3. Start backend + Qdrant
 docker compose up -d
+
+# 4. Start frontend
+cd axon-ui && npm install && npm run dev
 ```
 
-### 4. Ingest Personal Data
-Place your personal context files (`.txt`, `.pdf`) inside the `data/` folder, then run the ingestion script to vectorize the memory:
+Open http://localhost:3000
+
+## Ingesting Your Documents
+
+Upload files via the UI (drag-and-drop button in the header), or call the API directly:
+
 ```bash
-docker compose exec api python -c "from app.rag.qdrant_store import ingest_documents; ingest_documents('/code/data')"
+curl -X POST http://localhost:8000/ingest -F "file=@yourfile.pdf"
 ```
 
-### 5. Launch the Dashboard
-Navigate into the frontend directory and start the Next.js server:
-```bash
-cd axon-ui
-npm install
-npm run dev
-```
-Open **`http://localhost:3000`** in your browser.
-
-##Privacy & Security Note
-The RAG pipeline is configured with a "System Authorization Override" to bypass standard LLM confidentiality guardrails for the specific user's local data. **Do not expose the FastAPI port (`8000`) to the public internet without adding authentication middleware**, as it has local file system and OS tool execution capabilities.
+Supported: `.pdf`, `.txt`, `.png`, `.jpg`
