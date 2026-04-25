@@ -1,56 +1,88 @@
-import os
-from langchain_community.document_loaders import PyPDFLoader, TextLoader, DirectoryLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Qdrant
-from langchain_community.embeddings import OllamaEmbeddings
 from qdrant_client import QdrantClient
+from qdrant_client.models import (
+    Distance, VectorParams, PointStruct, Filter,
+    FieldCondition, MatchValue
+)
+import uuid
+from app.rag.embedder import embedder
 
-# Configurations
 QDRANT_URL = "http://qdrant:6333"
 COLLECTION_NAME = "axon_knowledge"
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://172.17.0.1:11434")
+VECTOR_SIZE = 384  # all-MiniLM-L6-v2 output dimension
 
-def ingest_documents(data_path: str):
-    print(f"--- Scanning directory: {data_path} ---")
-    
-    # 1. Load PDFs and Text files specifically
-    pdf_loader = DirectoryLoader(data_path, glob="./*.pdf", loader_cls=PyPDFLoader)
-    txt_loader = DirectoryLoader(data_path, glob="./*.txt", loader_cls=TextLoader)
-    
-    # Combine all found documents
-    documents = pdf_loader.load() + txt_loader.load()
-    
-    if not documents:
-        print("No documents found to ingest! Check your /data folder.")
-        return
+def get_client() -> QdrantClient:
+    return QdrantClient(url=QDRANT_URL)
 
-    for doc in documents:
-        print(f"Successfully Loaded: {doc.metadata.get('source')}")
+def ensure_collection():
+    client = get_client()
+    existing = [c.name for c in client.get_collections().collections]
+    if COLLECTION_NAME not in existing:
+        client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE),
+        )
+        print(f"[Qdrant] Created collection '{COLLECTION_NAME}'")
+    return client
 
-    # 2. Split text into manageable chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    chunks = text_splitter.split_documents(documents)
-    
-    print(f"Total chunks created: {len(chunks)}")
-    
-    # 3. Initialize Embeddings and Vector Store
-    embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_HOST)
-    
-    print(f"Ingesting into Qdrant at {QDRANT_URL}...")
-    
-    Qdrant.from_documents(
-        chunks,
-        embeddings,
-        url=QDRANT_URL,
+def ingest_chunks(chunks: list[dict]) -> dict:
+    client = ensure_collection()
+    new_count = 0
+    skipped_count = 0
+    points = []
+
+    # Get existing hashes to skip duplicates
+    existing_hashes = set()
+    try:
+        scroll_result = client.scroll(collection_name=COLLECTION_NAME, limit=10000, with_payload=True)
+        for point in scroll_result[0]:
+            h = point.payload.get("metadata", {}).get("hash")
+            if h:
+                existing_hashes.add(h)
+    except Exception:
+        pass
+
+    texts = [c["content"] for c in chunks]
+    vectors = embedder.encode_texts(texts)
+
+    for chunk, vector in zip(chunks, vectors):
+        chunk_hash = chunk["metadata"]["hash"]
+        if chunk_hash in existing_hashes:
+            skipped_count += 1
+            continue
+        points.append(PointStruct(
+            id=str(uuid.uuid4()),
+            vector=vector,
+            payload={"content": chunk["content"], "metadata": chunk["metadata"]}
+        ))
+        new_count += 1
+
+    if points:
+        client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+    return {"ingested": new_count, "skipped": skipped_count}
+
+def semantic_search(query: str, top_k: int = 8) -> list[dict]:
+    client = get_client()
+    query_vector = embedder.encode_query(query)
+    results = client.search(
         collection_name=COLLECTION_NAME,
-        force_recreate=True  # Wipes old data to ensure the new files are active
+        query_vector=query_vector,
+        limit=top_k,
+        with_payload=True
     )
-    print("--- Ingestion complete! Axon's memory is updated. ---")
+    return [
+        {
+            "content": r.payload["content"],
+            "source": r.payload["metadata"].get("source", "unknown"),
+            "score": r.score
+        }
+        for r in results
+    ]
 
-def get_retriever():
-    client = QdrantClient(url=QDRANT_URL)
-    embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_HOST)
-    qdrant = Qdrant(client=client, collection_name=COLLECTION_NAME, embeddings=embeddings)
-    
-    # Return top 10 results for better accuracy
-    return qdrant.as_retriever(search_kwargs={"k": 10})
+def get_collection_stats() -> dict:
+    try:
+        client = get_client()
+        info = client.get_collection(COLLECTION_NAME)
+        return {"document_count": info.points_count, "status": info.status}
+    except Exception as e:
+        return {"document_count": 0, "status": "error", "detail": str(e)}
