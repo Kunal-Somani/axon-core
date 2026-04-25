@@ -1,125 +1,136 @@
-"use client";
+'use client'
+import { useRef, useState, useEffect, useCallback } from 'react'
+import { useAxonStore } from './store'
+import { useAxonWebSocket } from './hooks/useAxonWebSocket'
+import { MessageBubble } from './components/MessageBubble'
+import { SystemStatus } from './components/SystemStatus'
+import { FileUpload } from './components/FileUpload'
+import { Send, Zap, ImagePlus } from 'lucide-react'
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Terminal, Database, Sparkles } from 'lucide-react';
-
-export default function AxonChat() {
-  const [messages, setMessages] = useState([
-    { role: 'assistant', text: "Axon Core Online. Ready for RAG or System Tool execution.", route: 'system' }
-  ]);
-  const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+export default function Home() {
+  const [input, setInput] = useState('')
+  const [pendingImage, setPendingImage] = useState<string | null>(null)
+  const { messages, isStreaming } = useAxonStore()
+  const { sendMessage } = useAxonWebSocket()
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    scrollRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
-  const handleSend = async () => {
-    if (!input.trim()) return;
+  const handleSend = useCallback(() => {
+    const q = input.trim()
+    if (!q || isStreaming) return
+    sendMessage(q, pendingImage || undefined)
+    setInput('')
+    setPendingImage(null)
+  }, [input, isStreaming, pendingImage, sendMessage])
 
-    const userMsg = { role: 'user', text: input };
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
-    setIsLoading(true);
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
+  }
 
-    try {
-      const response = await fetch('http://localhost:8000/chat/orchestrator', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: input }),
-      });
+  const handlePaste = async (e: React.ClipboardEvent) => {
+    const item = Array.from(e.clipboardData.items).find(i => i.type.startsWith('image/'))
+    if (!item) return
+    const blob = item.getAsFile()
+    if (!blob) return
+    const reader = new FileReader()
+    reader.onload = () => { if (typeof reader.result === 'string') setPendingImage(reader.result.split(',')[1]) }
+    reader.readAsDataURL(blob)
+  }
 
-      const data = await response.json();
-      
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        text: data.response,
-        route: data.route_taken 
-      }]);
-    } catch (error) {
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        text: "Error: Could not connect to Axon Backend. Ensure Docker is running.",
-        route: 'error' 
-      }]);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => { if (typeof reader.result === 'string') setPendingImage(reader.result.split(',')[1]) }
+    reader.readAsDataURL(file)
+  }
 
   return (
-    <main className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans">
-      <header className="p-4 border-b border-slate-800 bg-slate-900/50 flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <Bot size={20} className="text-white" />
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg-primary)' }}>
+      {/* Header */}
+      <header style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 24px', borderBottom: '1px solid var(--border)',
+        background: 'rgba(24,24,27,0.8)', backdropFilter: 'blur(12px)', position: 'sticky', top: 0, zIndex: 10
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 32, height: 32, borderRadius: 8, background: 'linear-gradient(135deg,#2563eb,#7c3aed)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Zap size={18} color="white" />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">AXON <span className="text-blue-500">CORE</span></h1>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 15, fontWeight: 700, letterSpacing: '-0.02em' }}>Axon</h1>
+            <p style={{ margin: 0, fontSize: 11, color: 'var(--text-muted)' }}>Hybrid RAG · Multimodal · Local</p>
+          </div>
         </div>
-        <div className="flex gap-4 text-xs font-mono text-slate-400">
-          <span className="flex items-center gap-1"><div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"/> API: 8000</span>
-          <span className="flex items-center gap-1"><div className="w-2 h-2 bg-blue-500 rounded-full"/> QDRANT: 6333</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <FileUpload />
+          <SystemStatus />
         </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        {messages.map((msg, i) => (
-          <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-              <div className={`w-8 h-8 rounded flex items-center justify-center shrink-0 ${
-                msg.role === 'user' ? 'bg-slate-700' : 'bg-blue-900/30 text-blue-400 border border-blue-800/50'
-              }`}>
-                {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
-              </div>
-              
-              <div className={`p-4 rounded-2xl ${
-                msg.role === 'user' 
-                  ? 'bg-blue-600 text-white rounded-tr-none' 
-                  : 'bg-slate-900 border border-slate-800 rounded-tl-none'
-              }`}>
-                {msg.route && msg.role === 'assistant' && (
-                  <div className="flex items-center gap-1.5 mb-2 text-[10px] uppercase tracking-widest font-bold opacity-50">
-                    {msg.route === 'rag' && <><Database size={10} /> Knowledge Base</>}
-                    {msg.route === 'tools' && <><Terminal size={10} /> System Tool</>}
-                    {msg.route === 'general' && <><Sparkles size={10} /> General AI</>}
-                  </div>
-                )}
-                <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-              </div>
+      {/* Messages */}
+      <main style={{ flex: 1, overflowY: 'auto', padding: '24px', maxWidth: 860, width: '100%', margin: '0 auto' }} className="scrollbar-thin">
+        {messages.length === 0 && (
+          <div style={{ textAlign: 'center', marginTop: 100 }}>
+            <div style={{ width: 64, height: 64, borderRadius: 16, background: 'linear-gradient(135deg,#2563eb22,#7c3aed22)', border: '1px solid #2563eb33', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' }}>
+              <Zap size={28} color="#60a5fa" />
             </div>
-          </div>
-        ))}
-        {isLoading && (
-          <div className="flex justify-start animate-pulse">
-            <div className="bg-slate-900 p-4 rounded-2xl rounded-tl-none border border-slate-800 text-slate-500 text-xs italic">
-              Axon is processing...
-            </div>
+            <h2 style={{ color: 'var(--text-primary)', fontSize: 22, fontWeight: 700, margin: '0 0 8px' }}>Axon is ready</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: 14 }}>Ask about your documents, run tools, or just chat.</p>
           </div>
         )}
+        {messages.map(msg => <MessageBubble key={msg.id} message={msg} />)}
         <div ref={scrollRef} />
-      </div>
+      </main>
 
-      <div className="p-6 bg-slate-950 border-t border-slate-900">
-        <div className="max-w-4xl mx-auto relative">
-          <input
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl py-4 pl-4 pr-14 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all placeholder:text-slate-600 text-sm"
-            placeholder="Ask Kunal's AI anything..."
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          />
-          <button 
-            onClick={handleSend}
-            className="absolute right-2 top-2 bottom-2 px-4 bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors flex items-center justify-center"
-          >
-            <Send size={18} />
-          </button>
+      {/* Input */}
+      <div style={{ padding: '16px 24px 24px', borderTop: '1px solid var(--border)', background: 'var(--bg-secondary)' }}>
+        <div style={{ maxWidth: 860, margin: '0 auto' }}>
+          {pendingImage && (
+            <div style={{ marginBottom: 8, padding: '6px 12px', background: 'rgba(37,99,235,0.15)', borderRadius: 8, fontSize: 12, color: '#60a5fa', display: 'flex', justifyContent: 'space-between' }}>
+              <span>🖼 Image attached</span>
+              <button onClick={() => setPendingImage(null)} style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', fontSize: 12 }}>Remove</button>
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+            <input type="file" ref={fileInputRef} accept="image/*" style={{ display: 'none' }} onChange={handleImageFile} />
+            <button onClick={() => fileInputRef.current?.click()} style={{
+              background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 10,
+              padding: '12px', color: 'var(--text-muted)', cursor: 'pointer', flexShrink: 0
+            }}>
+              <ImagePlus size={18} />
+            </button>
+            <textarea
+              style={{
+                flex: 1, background: 'var(--bg-card)', border: '1px solid var(--border)',
+                borderRadius: 12, padding: '12px 16px', fontSize: 14, color: 'var(--text-primary)',
+                resize: 'none', outline: 'none', fontFamily: 'inherit', lineHeight: 1.5, minHeight: 48, maxHeight: 160
+              }}
+              placeholder="Message Axon... (Shift+Enter for newline, paste an image)"
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              rows={1}
+            />
+            <button onClick={handleSend} disabled={isStreaming || !input.trim()} style={{
+              background: isStreaming || !input.trim() ? 'var(--bg-card)' : 'var(--accent)',
+              border: '1px solid var(--border)', borderRadius: 10, padding: '12px 16px',
+              color: isStreaming || !input.trim() ? 'var(--text-muted)' : 'white',
+              cursor: isStreaming || !input.trim() ? 'not-allowed' : 'pointer', flexShrink: 0, transition: 'all 0.2s'
+            }}>
+              <Send size={18} />
+            </button>
+          </div>
+          <p style={{ textAlign: 'center', fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>
+            Hybrid RRF · BART Router · Phi-3 Local LLM · BLIP Vision · BM25+Dense
+          </p>
         </div>
-        <p className="text-[10px] text-center mt-4 text-slate-600 uppercase tracking-widest">
-          Hybrid RAG + System Automation Engine
-        </p>
       </div>
-    </main>
-  );
+    </div>
+  )
 }
