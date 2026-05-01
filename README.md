@@ -1,4 +1,4 @@
-# Axon — Production Multimodal AI Assistant
+# Axon - Production Multimodal AI Assistant
 
 A locally-hosted AI assistant with hybrid RAG, semantic routing, multimodal input, and zero external LLM API dependencies.
 
@@ -27,7 +27,7 @@ graph TD
     end
     
     VISION[Vision Engine<br/>BLIP + Tesseract OCR]
-    TOOLS[Secure Tool Registry<br/>psutil · DuckDuckGo · Open-Meteo]
+    TOOLS[Secure Tool Registry<br/>psutil , DuckDuckGo , Open-Meteo]
     LLM[LLM Engine<br/>Phi-3-mini GGUF via llama-cpp-python]
     MEMORY[(SQLite Session Memory<br/>Last 6 turns of context)]
     
@@ -43,13 +43,13 @@ graph TD
 | Model | Role | Size | Why |
 |---|---|---|---|
 | all-MiniLM-L6-v2 | Text Embeddings | ~90MB | Fast, 384-dim, strong semantic similarity at small size |
-| facebook/bart-large-mnli | Semantic Router | ~1.6GB | Zero-shot NLI classification — no fine-tuning required |
+| facebook/bart-large-mnli | Semantic Router | ~1.6GB | Zero-shot NLI classification - no fine-tuning required |
 | Phi-3-mini-4k-instruct Q4_K_M | LLM (generation) | ~2.3GB | State-of-the-art at its size class, runs efficiently on CPU via llama.cpp |
 | Salesforce/blip-image-captioning-base | Vision | ~990MB | Strong image captioning + composable with Tesseract OCR |
 
 ## Design Decisions
 
-**llama-cpp-python over Ollama:** Ollama is a daemon that wraps GGUF models over HTTP. Using llama-cpp-python directly loads the model into the Python process — no daemon dependency, reproducible, and embeds cleanly in Docker.
+**llama-cpp-python over Ollama:** Ollama is a daemon that wraps GGUF models over HTTP. Using llama-cpp-python directly loads the model into the Python process - no daemon dependency, reproducible, and embeds cleanly in Docker.
 
 **BART MNLI over prompt-based routing:** A prompt-based router (asking the LLM "which category is this?") adds a full LLM inference round-trip to every request. BART-MNLI runs a dedicated classification head on ~50ms CPU inference with calibrated confidence scores.
 
