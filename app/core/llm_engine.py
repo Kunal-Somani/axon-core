@@ -2,7 +2,7 @@ import os
 import time
 from pathlib import Path
 from typing import Generator
-from llama_cpp import Llama
+from llama_cpp import Llama, LlamaGrammar
 
 MODEL_PATH = Path(__file__).parent.parent.parent / "models" / "llm" / "Phi-3-mini-4k-instruct-q4.gguf"
 
@@ -42,6 +42,18 @@ class LLMEngine:
         if stream:
             return self._stream(prompt, max_tokens)
         output = self._llm(prompt, max_tokens=max_tokens, stop=["<|end|>", "\nUser:", "\nHuman:"])
+        return output["choices"][0]["text"].strip()
+
+    def generate_structured(self, prompt: str, grammar_str: str, max_tokens: int = 150) -> str:
+        if self._llm is None:
+            self.load()
+        grammar = LlamaGrammar.from_string(grammar_str)
+        output = self._llm(
+            prompt,
+            max_tokens=max_tokens,
+            grammar=grammar,
+            stop=["<|end|>"]
+        )
         return output["choices"][0]["text"].strip()
 
     def _stream(self, prompt: str, max_tokens: int) -> Generator[str, None, None]:
