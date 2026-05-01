@@ -109,3 +109,17 @@ def execute_tool(tool_name: str, params: dict) -> dict:
 
 def get_available_tools() -> list[str]:
     return list(TOOL_REGISTRY.keys())
+
+def build_tool_grammar() -> str:
+    tool_names = " | ".join(f'"{name}"' for name in TOOL_REGISTRY.keys())
+    return f'''
+root   ::= "{{" ws "\\"tool\\":" ws tool-name "," ws "\\"params\\":" ws object ws "}}"
+tool-name ::= {tool_names}
+object ::= "{{" ws (string ":" ws value ("," ws string ":" ws value)*)? "}}"
+value  ::= string | number | "true" | "false" | "null" | object
+string ::= "\\"" ([^"\\\\] | "\\\\" .)* "\\""
+number ::= "-"? ([0-9]+ ("." [0-9]+)?)
+ws     ::= [ \\t\\n]*
+'''
+
+TOOL_GRAMMAR = build_tool_grammar()
