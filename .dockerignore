@@ -1,0 +1,28 @@
+# Node.js
+axon-ui/node_modules/
+axon-ui/.next/
+axon-ui/.pnp/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.env
+*.env
+
+# Models (mounted as Docker volume, not baked in — prevents 5GB+ build context)
+models/
+
+# Data and logs
+logs/
+axon_memory.db*
+
+# Git and IDE
+.git/
+.gitignore
+*.md
+docs/
+
+# Legacy
+legacy_v1/
