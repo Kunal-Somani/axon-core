@@ -12,36 +12,35 @@ class VisionEngine:
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._captioner = None
+            cls._instance._model = None
+            cls._instance._tokenizer = None
             cls._instance._load_time_ms = None
         return cls._instance
 
     def load(self):
-        if self._captioner is not None:
+        if self._model is not None:
             return
-        from transformers import BlipProcessor, BlipForConditionalGeneration
-        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
         if not MODEL_PATH.exists():
             raise FileNotFoundError(f"Vision model not found at {MODEL_PATH}. Run scripts/download_models.sh first.")
-        print(f"[Vision] Loading BLIP from {MODEL_PATH}...")
+        print(f"[Vision] Loading moondream2 from {MODEL_PATH}...")
         start = time.time()
-        self._processor = BlipProcessor.from_pretrained(str(MODEL_PATH))
-        self._captioner = BlipForConditionalGeneration.from_pretrained(str(MODEL_PATH))
+        self._tokenizer = AutoTokenizer.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
+        self._model = AutoModelForCausalLM.from_pretrained(str(MODEL_PATH), trust_remote_code=True)
+        self._model.eval()
         self._load_time_ms = int((time.time() - start) * 1000)
         print(f"[Vision] Ready in {self._load_time_ms}ms")
 
-    def describe_image(self, image_bytes: bytes) -> str:
-        if self._captioner is None:
+    def answer_visual_question(self, image_bytes: bytes, question: str) -> str:
+        if self._model is None:
             self.load()
-        import torch
         try:
             image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-            inputs = self._processor(image, return_tensors="pt")
-            with torch.no_grad():
-                out = self._captioner.generate(**inputs, max_new_tokens=100)
-            return self._processor.decode(out[0], skip_special_tokens=True)
+            enc_image = self._model.encode_image(image)
+            answer = self._model.answer_question(enc_image, question, self._tokenizer)
+            return answer
         except Exception as e:
-            return f"Image captioning failed: {e}"
+            return f"Visual QA failed: {e}"
 
     def extract_text_from_image(self, image_bytes: bytes) -> str:
         try:
@@ -50,17 +49,18 @@ class VisionEngine:
         except Exception as e:
             return ""
 
-    def analyze(self, image_bytes: bytes) -> str:
-        caption = self.describe_image(image_bytes)
+    def analyze(self, image_bytes: bytes, user_prompt: str = "") -> str:
+        question = user_prompt if user_prompt else "Describe this image in detail."
+        vqa_result = self.answer_visual_question(image_bytes, question)
         ocr = self.extract_text_from_image(image_bytes)
-        result = f"Image description: {caption}"
-        if ocr:
-            result += f"\n\nText found in image:\n{ocr}"
+        result = f"Visual analysis: {vqa_result}"
+        if ocr and ocr not in vqa_result:
+            result += f"\n\nText detected in image:\n{ocr}"
         return result
 
     def health_check(self) -> dict:
         return {
-            "loaded": self._captioner is not None,
+            "loaded": self._model is not None,
             "model_path": str(MODEL_PATH),
             "model_exists": MODEL_PATH.exists(),
             "load_time_ms": self._load_time_ms,
