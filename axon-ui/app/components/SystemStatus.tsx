@@ -2,13 +2,14 @@
 import { useEffect } from 'react'
 import { useAxonStore } from '../store'
 import { Wifi, WifiOff, Database, Cpu } from 'lucide-react'
+import { ENDPOINTS } from '../../lib/config'
 
 export function SystemStatus() {
   const { health, setHealth, wsStatus } = useAxonStore()
 
   useEffect(() => {
     const poll = () =>
-      fetch('http://localhost:8000/health')
+      fetch(ENDPOINTS.health)
         .then(r => r.json())
         .then(setHealth)
         .catch(() => {})

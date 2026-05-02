@@ -1,6 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 import { Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { ENDPOINTS } from '../../lib/config'
 
 type Status = 'idle' | 'uploading' | 'success' | 'error'
 
@@ -15,7 +16,7 @@ export function FileUpload() {
     const form = new FormData()
     form.append('file', file)
     try {
-      const res = await fetch('http://localhost:8000/ingest', { method: 'POST', body: form })
+      const res = await fetch(ENDPOINTS.ingest, { method: 'POST', body: form })
       const data = await res.json()
       if (res.ok) {
         setStatus('success')
