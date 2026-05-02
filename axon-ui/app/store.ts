@@ -9,6 +9,7 @@ export interface Message {
   content: string
   route?: Route
   confidence?: number
+  all_scores?: Record<string, number>
   sources?: Source[]
   isStreaming?: boolean
   timestamp: Date
@@ -23,7 +24,7 @@ export interface ModelStatus {
 export interface HealthData {
   status: string
   uptime_seconds: number
-  models: { embedder: ModelStatus; llm: ModelStatus; router: ModelStatus; vision: ModelStatus }
+  models: { embedder: ModelStatus; llm: ModelStatus; router: ModelStatus; vision: ModelStatus; reranker: ModelStatus; whisper: ModelStatus; tts: ModelStatus }
   qdrant: { document_count: number; status: string }
   available_tools: string[]
 }
@@ -36,7 +37,7 @@ interface AxonStore {
   isStreaming: boolean
   addMessage: (msg: Omit<Message, 'id' | 'timestamp'>) => string
   appendToken: (id: string, token: string) => void
-  finalizeMessage: (id: string, data: { route: Route; confidence: number; sources: Source[] }) => void
+  finalizeMessage: (id: string, data: { route: Route; confidence: number; all_scores?: Record<string, number>; sources: Source[] }) => void
   setWsStatus: (s: AxonStore['wsStatus']) => void
   setHealth: (h: HealthData) => void
   setStreaming: (v: boolean) => void

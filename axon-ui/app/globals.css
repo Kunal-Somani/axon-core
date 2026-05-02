@@ -1,23 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500&display=swap');
 @import "tailwindcss";
 
 :root {
-  --bg-primary: #09090b;
-  --bg-secondary: #18181b;
-  --bg-card: #1c1c1f;
-  --border: #27272a;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --text-primary: #fafafa;
-  --text-secondary: #a1a1aa;
-  --text-muted: #52525b;
-  --success: #22c55e;
-  --warning: #f59e0b;
-  --danger: #ef4444;
+  --void: #060608;
+  --surface-0: #0c0c10;
+  --surface-1: #121218;
+  --surface-2: #1a1a24;
+  --border-dim: rgba(255,255,255,0.06);
+  --border-mid: rgba(255,255,255,0.12);
+  --border-active: rgba(255,255,255,0.22);
+  --accent: #5b7fff;
+  --accent-muted: rgba(91,127,255,0.12);
+  --accent-glow: rgba(91,127,255,0.25);
+  --text-0: #f0f0f8;
+  --text-1: #9090a8;
+  --text-2: #50505c;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --route-rag: #818cf8;
+  --route-tools: #34d399;
+  --route-general: #f9a8d4;
+  --route-vision: #fbbf24;
+  --route-audio: #60a5fa;
+
+  /* Legacy mappings so previous components don't instantly break */
+  --bg-primary: var(--void);
+  --bg-secondary: var(--surface-0);
+  --bg-card: var(--surface-1);
+  --border: var(--border-dim);
+  --text-primary: var(--text-0);
+  --text-muted: var(--text-1);
 }
 
 * { box-sizing: border-box; }
-body { background: var(--bg-primary); color: var(--text-primary); font-family: 'Inter', sans-serif; margin: 0; }
 
-.scrollbar-thin::-webkit-scrollbar { width: 4px; }
-.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
-.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+body { 
+  background: var(--void); 
+  color: var(--text-0); 
+  font-family: 'IBM Plex Sans', sans-serif; 
+  font-size: 13px;
+  line-height: 1.7;
+  margin: 0; 
+}
+
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.surface { background: var(--surface-1); border: 1px solid var(--border-dim); }
+.glow { box-shadow: 0 0 0 1px var(--accent-glow), 0 0 20px var(--accent-muted); }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-mid); border-radius: 2px; }
+
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+.cursor-blink { animation: blink 1s step-end infinite; }
