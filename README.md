@@ -1,87 +1,103 @@
-# Axon - Production Multimodal AI Assistant
+# Axon - Self-Hosted Multimodal AI Assistant
 
-A locally-hosted AI assistant with hybrid RAG, semantic routing, multimodal input, and zero external LLM API dependencies.
+Tri-modal AI assistant (text, speech, vision) with hybrid RAG, cross-encoder reranking, and a BART-MNLI semantic router. Zero external LLM API dependencies.
 
 ## Architecture
 
 ```mermaid
 graph TD
-    UI[Next.js Frontend<br/>WebSocket Streaming]
-    WS[FastAPI WebSocket /ws/chat]
-    ROUTER[BART-MNLI Zero-Shot Router<br/>facebook/bart-large-mnli]
+    User([User]) -->|Text / Image / Audio| Router[BART-MNLI Router]
     
-    UI -->|WebSocket| WS
-    WS --> ROUTER
+    %% Input Routing
+    Router -->|Query| RAG[Hybrid RAG Engine]
+    Router -->|Upload| Vision[moondream2 VQA]
+    Router -->|Tools| Tools[Tool Calling Engine]
     
-    ROUTER -->|personal_knowledge_query / document_analysis| HYBRID
-    ROUTER -->|system_tool_execution| TOOLS
-    ROUTER -->|general_conversation| LLM
-    ROUTER -->|image_analysis| VISION
+    %% Speech Input
+    Whisper[Whisper STT] -->|Transcribes| Router
     
-    subgraph HYBRID [Hybrid RAG Engine]
-        DENSE[Dense Retrieval<br/>all-MiniLM-L6-v2 + Qdrant]
-        SPARSE[Sparse Retrieval<br/>BM25Okapi]
-        RRF[Reciprocal Rank Fusion<br/>k=60]
-        DENSE --> RRF
-        SPARSE --> RRF
+    %% RAG Pipeline
+    subgraph RAG Pipeline
+        RAG --> Dense[Dense: MiniLM Qdrant]
+        RAG --> Sparse[Sparse: BM25 In-Memory]
+        Dense --> Reranker[Cross-Encoder Reranker]
+        Sparse --> Reranker
     end
     
-    VISION[Vision Engine<br/>BLIP + Tesseract OCR]
-    TOOLS[Secure Tool Registry<br/>psutil , DuckDuckGo , Open-Meteo]
-    LLM[LLM Engine<br/>Phi-3-mini GGUF via llama-cpp-python]
-    MEMORY[(SQLite Session Memory<br/>Last 6 turns of context)]
+    %% Tool Pipeline
+    subgraph Tool Pipeline
+        Tools --> GBNF[GBNF Grammar Constrained]
+    end
     
-    RRF --> LLM
-    VISION --> LLM
-    TOOLS --> UI
-    LLM --> UI
-    LLM <-->|read/write| MEMORY
+    %% Output
+    Reranker --> LLM[Phi-3 LLM]
+    Vision --> LLM
+    GBNF --> LLM
+    LLM --> TextOut[Text Output]
+    TextOut --> Kokoro[Kokoro TTS]
+    Kokoro --> AudioOut[Audio Output]
 ```
 
-## Models Used
+## Model Roster
 
-| Model | Role | Size | Why |
-|---|---|---|---|
-| all-MiniLM-L6-v2 | Text Embeddings | ~90MB | Fast, 384-dim, strong semantic similarity at small size |
-| facebook/bart-large-mnli | Semantic Router | ~1.6GB | Zero-shot NLI classification - no fine-tuning required |
-| Phi-3-mini-4k-instruct Q4_K_M | LLM (generation) | ~2.3GB | State-of-the-art at its size class, runs efficiently on CPU via llama.cpp |
-| Salesforce/blip-image-captioning-base | Vision | ~990MB | Strong image captioning + composable with Tesseract OCR |
+| Model | Role | Size | Source |
+|-------|------|------|--------|
+| all-MiniLM-L6-v2 | Sentence Embeddings | ~90MB | HF: sentence-transformers |
+| facebook/bart-large-mnli | Semantic Router | ~1.6GB | HF: facebook |
+| cross-encoder/ms-marco-MiniLM-L-6-v2 | Reranker | ~90MB | HF: cross-encoder |
+| Phi-3-mini-4k-instruct Q4_K_M | LLM Generation | ~2.3GB | HF: microsoft |
+| vikhyatk/moondream2 | Visual QA | ~1.9GB | HF: vikhyatk |
+| openai/whisper-tiny.en | Speech-to-Text | ~150MB | HF: openai |
+| hexgrad/Kokoro-82M | Text-to-Speech | ~82MB | HF: hexgrad |
+
+Total: ~6.3GB
 
 ## Design Decisions
 
-**llama-cpp-python over Ollama:** Ollama is a daemon that wraps GGUF models over HTTP. Using llama-cpp-python directly loads the model into the Python process - no daemon dependency, reproducible, and embeds cleanly in Docker.
+**Cross-Encoder over pure bi-encoder retrieval:** Bi-encoders (like MiniLM) encode query and document independently, so they can't model query-document interaction. Cross-encoders see both together — they rerank the top-N bi-encoder candidates with significantly higher precision at acceptable latency.
 
-**BART MNLI over prompt-based routing:** A prompt-based router (asking the LLM "which category is this?") adds a full LLM inference round-trip to every request. BART-MNLI runs a dedicated classification head on ~50ms CPU inference with calibrated confidence scores.
+**Grammar-constrained tool calling over free-form JSON parsing:** llama-cpp-python supports GBNF grammar sampling, which constrains the token distribution to only produce valid JSON with the correct tool name. Eliminates JSON parsing failures and tool name hallucination.
 
-**Reciprocal Rank Fusion over naive concatenation:** Pure dense retrieval misses exact keyword matches. Pure BM25 misses semantic similarity. RRF merges ranked lists from both without requiring score normalisation across incompatible scales.
+**moondream2 over BLIP-base:** BLIP-base performs unconditional captioning — it describes an image without considering the user's question. moondream2 supports prompted VQA, enabling the system to answer specific visual questions. At 1.9GB it's viable on CPU for batch (non-real-time) inference.
 
-**BM25 in-memory index:** The BM25 corpus is rebuilt on each ingest and held in RAM. For the scale this project operates at (hundreds to low thousands of chunks), this is faster than a database round-trip and avoids an additional service dependency.
+**Token-aware chunking:** Document ingestion relies strictly on token-aware boundaries (rather than standard word splitting) to guarantee safety under the strict 512-token dense limits.
 
 ## Quick Start
 
-```bash
-# 1. Clone and enter the project
-git clone <repo_url> && cd axon-core
+1. Install backend and frontend dependencies:
 
-# 2. Download all model weights (~5GB total)
-chmod +x scripts/download_models.sh
-./scripts/download_models.sh
+   ```bash
+   pip install -r requirements.txt
+   cd axon-ui && npm install
+   ```
 
-# 3. Start backend + Qdrant
-docker compose up -d
+2. Download ~6.3GB of local models:
 
-# 4. Start frontend
-cd axon-ui && npm install && npm run dev
-```
+   ```bash
+   bash scripts/download_models.sh
+   ```
 
-Open http://localhost:3000
+3. Boot up the local Qdrant Vector database:
 
-## Ingesting Your Documents
+   ```bash
+   docker-compose up -d qdrant
+   ```
 
-Upload files via the UI (drag-and-drop button in the header), or call the API directly:
+4. Launch Axon backend and frontend:
 
-```bash
-curl -X POST http://localhost:8000/ingest -F "file=@yourfile.pdf"
-```
+   ```bash
+   uvicorn app.main:app --reload
+   # In another terminal:
+   cd axon-ui && npm run dev
+   ```
 
-Supported: `.pdf`, `.txt`, `.png`, `.jpg`
+## Engineering Notes
+
+- Fully local inference stack with zero external LLM API dependencies
+- Modular service-oriented backend architecture
+- Hybrid retrieval pipeline with dense + sparse search fusion
+- Cross-encoder reranking for improved retrieval precision
+- Grammar-constrained tool calling using GBNF sampling
+- Token-aware document chunking for dense embedding safety
+- Optimized for consumer-grade hardware deployment
+- No dead dependencies and unused abstraction layers
