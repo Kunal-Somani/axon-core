@@ -1,8 +1,7 @@
 'use client'
 import { useEffect, useRef, useCallback } from 'react'
 import { useAxonStore, Route } from '../store'
-
-const WS_URL = 'ws://localhost:8000/ws/chat'
+import { ENDPOINTS } from '../../lib/config'
 
 export function useAxonWebSocket() {
   const ws = useRef<WebSocket | null>(null)
@@ -11,7 +10,7 @@ export function useAxonWebSocket() {
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return
     setWsStatus('connecting')
-    const socket = new WebSocket(WS_URL)
+    const socket = new WebSocket(ENDPOINTS.wsChat)
     ws.current = socket
 
     socket.onopen = () => setWsStatus('connected')
@@ -35,6 +34,7 @@ export function useAxonWebSocket() {
           finalizeMessage(currentMsgId, {
             route: data.route as Route,
             confidence: data.confidence,
+            all_scores: data.all_scores,
             sources: data.sources || []
           })
           currentMsgId = null
